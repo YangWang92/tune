@@ -18,9 +18,9 @@ from os import getpid
 from pathlib import Path
 
 from onnxruntime import InferenceSession, SessionOptions, GraphOptimizationLevel, ExecutionMode, __version__ as ort_version
-from onnxruntime_tools.transformers.optimizer import optimize_model
+from onnxruntime.transformers import optimizer
 from tqdm import trange
-from transformers import TensorType
+from transformers import TensorType, AutoConfig
 from transformers.convert_graph_to_onnx import convert as onnx_convert
 
 from backends import BackendConfig, Backend
@@ -124,10 +124,19 @@ class OnnxRuntimeBackend(Backend[OnnxRuntimeConfig]):
             model_opt_path = Path(self.onnx_path)
             opt_onnx_path = model_opt_path.with_suffix(".opt" + model_opt_path.suffix)
 
-            model_opt = optimize_model(
+            # Retrieve model's config from HF's hub
+            model_config = AutoConfig.from_pretrained(self.model)
+
+            # Optimize the graph with rewriting
+            # TODO: This works only for BERT-like models
+            model_opt = optimizer.optimize_model(
                 self.onnx_path,
                 model_type="bert",
-                opt_level=int(self.session_opts.graph_optimization_level)
+                num_heads=model_config.num_attention_heads,
+                hidden_size=model_config.hidden_size,
+                use_gpu=config.device == "cuda",
+                opt_level=int(self.session_opts.graph_optimization_level),
+                only_onnxruntime=True
             )
             model_opt.save_model_to_file(opt_onnx_path.absolute().as_posix())
             self.optimized_onnx_graph = opt_onnx_path.absolute().as_posix()
